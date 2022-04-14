@@ -16,7 +16,7 @@ import time
 import tensorflow as tf
 import evaluation
 from evaluation.eval_utils import setup_logger, compute_mAP
-from evaluation.eval_utils_cass import compute_degree_cm_mAP
+from evaluation.eval_utils_v1 import compute_degree_cm_mAP
 from tqdm import tqdm
 
 device = 'cuda'
