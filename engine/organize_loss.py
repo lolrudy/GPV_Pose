@@ -9,6 +9,11 @@ def control_loss(Train_stage):
         name_recon_list = []
         name_geo_list = []
         name_prop_list = []
+    elif Train_stage == 'shape_prior_only':
+        name_fs_list = ['Rot1', 'Rot2', 'Rot1_cos', 'Rot2_cos', 'Rot_regular', 'Tran', 'Size', 'R_con']
+        name_recon_list = []
+        name_geo_list = ['Geo_point']
+        name_prop_list = ['Prop_pm', ]
     else:
         raise NotImplementedError
     return name_fs_list, name_recon_list, name_geo_list, name_prop_list

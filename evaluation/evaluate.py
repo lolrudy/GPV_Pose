@@ -27,7 +27,7 @@ def evaluate(argv):
         os.makedirs(FLAGS.model_save)
     tf.compat.v1.disable_eager_execution()
     logger = setup_logger('eval_log', os.path.join(FLAGS.model_save, 'log_eval.txt'))
-    Train_stage = 'PoseNet_only'
+    Train_stage = FLAGS.train_stage
     FLAGS.train = False
 
     model_name = os.path.basename(FLAGS.resume_model).split('.')[0]
@@ -49,8 +49,8 @@ def evaluate(argv):
         if FLAGS.resume:
             state_dict = torch.load(FLAGS.resume_model)
             network.load_state_dict(state_dict)
-        else:
-            raise NotImplementedError
+        # else:
+        #     raise NotImplementedError
         # start to test
         network = network.eval()
         pred_results = []
@@ -70,9 +70,9 @@ def evaluate(argv):
                           depth_normalize=data['depth_normalize'].to(device),
                           obj_id=data['cat_id_0base'].to(device), camK=data['cam_K'].to(device),
                           gt_mask=data['roi_mask'].to(device),
-                          gt_R=None, gt_t=None, gt_s=None, mean_shape=mean_shape,
+                          mean_shape=data['mean_shape'].to(device),
                           gt_2D=data['roi_coord_2d'].to(device), sym=sym,
-                          def_mask=data['roi_mask'].to(device))
+                          def_mask=data['roi_mask'].to(device), shape_prior=data['shape_prior'].to(device))
             p_green_R_vec = output_dict['p_green_R'].detach()
             p_red_R_vec = output_dict['p_red_R'].detach()
             p_T = output_dict['Pred_T'].detach()

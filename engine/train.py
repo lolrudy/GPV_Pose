@@ -28,7 +28,7 @@ def train(argv):
     logger = setup_logger('train_log', os.path.join(FLAGS.model_save, 'log.txt'))
     for key, value in vars(FLAGS).items():
         logger.info(key + ':' + str(value))
-    Train_stage = 'PoseNet_only'
+    Train_stage = FLAGS.train_stage
     network = GPVPose(Train_stage)
     network = network.to(device)
     # resume or not
@@ -94,17 +94,23 @@ def train(argv):
             output_dict, loss_dict \
                 = network(rgb=data['roi_img'].to(device), depth=data['roi_depth'].to(device),
                           depth_normalize=data['depth_normalize'].to(device),
-                          obj_id=data['cat_id'].to(device), camK=data['cam_K'].to(device), gt_mask=data['roi_mask'].to(device),
+                          obj_id=data['cat_id'].to(device), camK=data['cam_K'].to(device),
+                          gt_mask=data['roi_mask'].to(device),
                           gt_R=data['rotation'].to(device), gt_t=data['translation'].to(device),
-                          gt_s=data['fsnet_scale'].to(device), mean_shape=data['mean_shape'].to(device),
+                          gt_s_delta=data['fsnet_scale_delta'].to(device), mean_shape=data['mean_shape'].to(device),
                           gt_2D=data['roi_coord_2d'].to(device), sym=data['sym_info'].to(device),
-                          aug_bb=data['aug_bb'].to(device), aug_rt_t=data['aug_rt_t'].to(device), aug_rt_r=data['aug_rt_R'].to(device),
+                          aug_bb=data['aug_bb'].to(device), aug_rt_t=data['aug_rt_t'].to(device),
+                          aug_rt_r=data['aug_rt_R'].to(device),
                           def_mask=data['roi_mask_deform'].to(device),
-                          model_point=data['model_point'].to(device), nocs_scale=data['nocs_scale'].to(device), do_loss=True)
+                          model_point=data['model_point'].to(device), nocs_scale=data['nocs_scale'].to(device),
+                          do_loss=True,
+                          shape_prior=data['shape_prior'].to(device), nocs_coord=data['nocs_coord'].to(device),
+                          logger=logger, batch_num=i)
             fsnet_loss = loss_dict['fsnet_loss']
             recon_loss = loss_dict['recon_loss']
             geo_loss = loss_dict['geo_loss']
             prop_loss = loss_dict['prop_loss']
+            prior_loss = loss_dict['prior_loss']
 
             total_loss = sum(fsnet_loss.values()) + sum(recon_loss.values()) \
                             + sum(geo_loss.values()) + sum(prop_loss.values()) \
@@ -130,33 +136,28 @@ def train(argv):
                                                                              simple_value=fsnet_loss['Rot2']),
                                                   tf.compat.v1.Summary.Value(tag='T_loss',
                                                                              simple_value=fsnet_loss['Tran']),
-                                                  tf.compat.v1.Summary.Value(tag='Prop_sym_recon',
-                                                                             simple_value=prop_loss['Prop_sym_recon']),
-                                                  tf.compat.v1.Summary.Value(tag='Prop_sym_rt',
-                                                                             simple_value=prop_loss['Prop_sym_rt']),
                                                   tf.compat.v1.Summary.Value(tag='Size_loss',
                                                                              simple_value=fsnet_loss['Size']),
-                                                  tf.compat.v1.Summary.Value(tag='Face_loss',
-                                                                             simple_value=recon_loss['recon_per_p']),
-                                                  tf.compat.v1.Summary.Value(tag='Recon_loss_r',
-                                                                             simple_value=recon_loss['recon_point_r']),
-                                                  tf.compat.v1.Summary.Value(tag='Recon_loss_t',
-                                                                             simple_value=recon_loss['recon_point_t']),
-                                                  tf.compat.v1.Summary.Value(tag='Recon_loss_s',
-                                                                             simple_value=recon_loss['recon_point_s']),
-                                                  tf.compat.v1.Summary.Value(tag='Recon_p_f',
-                                                                             simple_value=recon_loss['recon_p_f']),
-                                                  tf.compat.v1.Summary.Value(tag='Recon_loss_se',
-                                                                             simple_value=recon_loss['recon_point_self']),
-                                                  tf.compat.v1.Summary.Value(tag='Face_loss_vote',
-                                                                             simple_value=recon_loss['recon_point_vote']),
+                                                  tf.compat.v1.Summary.Value(tag='Shape_prior_total',
+                                                                             simple_value=sum(prior_loss.values())),
+                                                  tf.compat.v1.Summary.Value(tag='Shape_prior_corr',
+                                                                             simple_value=prior_loss.get('corr_loss',
+                                                                                                         0)),
+                                                  tf.compat.v1.Summary.Value(tag='Shape_prior_entropy',
+                                                                             simple_value=prior_loss.get('entropy_loss',
+                                                                                                         0)),
+                                                  tf.compat.v1.Summary.Value(tag='Shape_prior_cd',
+                                                                             simple_value=prior_loss.get('cd_loss', 0)),
+                                                  tf.compat.v1.Summary.Value(tag='Shape_prior_deform',
+                                                                             simple_value=prior_loss.get('deform_loss',
+                                                                                                         0)),
                                                   ])
             tb_writter.add_summary(summary, global_step)
 
             if i % FLAGS.log_every == 0:
-                logger.info('Batch {0} Loss:{1:f}, rot_loss:{2:f}, size_loss:{3:f}, trans_loss:{4:f}'.format(
+                logger.info('Batch {0} Loss:{1:f}, rot_loss:{2:f}, size_loss:{3:f}, trans_loss:{4:f}, prior_loss:{5:f}'.format(
                         i, total_loss.item(), (fsnet_loss['Rot1']+fsnet_loss['Rot2']).item(),
-                    fsnet_loss['Size'].item(), fsnet_loss['Tran'].item()))
+                    fsnet_loss['Size'].item(), fsnet_loss['Tran'].item(), sum(prior_loss.values())))
 
         logger.info('>>>>>>>>----------Epoch {:02d} train finish---------<<<<<<<<'.format(epoch))
 

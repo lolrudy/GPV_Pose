@@ -5,8 +5,8 @@ import absl.flags as flags
 # datasets
 flags.DEFINE_integer('obj_c', 6, 'nnumber of categories')
 flags.DEFINE_string('dataset', 'Real', 'CAMERA or CAMERA+Real')
-flags.DEFINE_string('dataset_dir', '/data/zrd/datasets/NOCS', 'path to the dataset')
-flags.DEFINE_string('detection_dir', '/data/zrd/datasets/NOCS/detection_dualposenet/data/segmentation_results', 'path to detection results')
+flags.DEFINE_string('dataset_dir', '/data2/zrd/datasets/NOCS', 'path to the dataset')
+flags.DEFINE_string('detection_dir', '/data2/zrd/datasets/NOCS/detection_dualposenet/data/segmentation_results', 'path to detection results')
 flags.DEFINE_string('per_obj', '', 'only train an specified object')
 
 # dynamic zoom in
@@ -117,8 +117,27 @@ flags.DEFINE_integer('resume', 0, '1 for resume, 0 for training from the start')
 flags.DEFINE_string('resume_model', '', 'path to the saved model')
 flags.DEFINE_integer('resume_point', 0, 'the epoch to continue the training')
 
-
-###################for evaluation#################
 flags.DEFINE_integer('eval_visualize_pcl', 0, 'save pcl when evaluation')
 flags.DEFINE_integer('eval_inference_only', 0, 'inference without evaluation')
 
+flags.DEFINE_integer('feat_pcl', 1286, 'channel of point cloud feature')
+flags.DEFINE_integer('feat_global_pcl', 512, 'channel of global point cloud feature')
+flags.DEFINE_integer('feat_seman', 32, 'semantic feature output channel')
+flags.DEFINE_integer('use_global_feat_for_ts', 0, '')
+
+# shape prior related
+flags.DEFINE_string("train_stage", 'shape_prior_only', '')
+flags.DEFINE_integer('use_shape_prior_loss', 1, '')
+flags.DEFINE_float('prior_corr_wt', 10.0, 'nocs coordinate loss')
+flags.DEFINE_float('prior_cd_wt', 20.0, 'chamfer distance loss between ground truth shape and predicted full shape')
+flags.DEFINE_float('prior_entropy_wt', 0.0001, 'entropy loss for assign matrix')
+flags.DEFINE_float('prior_deform_wt', 0.05, 'regularization loss for deformation field')
+flags.DEFINE_float('prior_sym_wt', 0.0, '')
+flags.DEFINE_float('prior_corr_threshold', 0.03, '')
+flags.DEFINE_integer('prior_corr_sym', 1, 'use symmetry aware corr loss')
+flags.DEFINE_float('consistency_beta', 0.05, '')
+flags.DEFINE_float('consistency_w', 3.0, '')
+flags.DEFINE_float('point_mask_distance_threshold', 0.1, '')
+flags.DEFINE_float('point_mask_conf_threshold', 0.7, '')
+flags.DEFINE_integer('point_mask_min_threshold', 100, '')
+flags.DEFINE_integer('use_gt_point_mask', 1, '')

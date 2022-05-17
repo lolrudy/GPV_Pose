@@ -145,8 +145,24 @@ class PoseDataset(data.Dataset):
                                           dtype=np.float)  # [fx, fy, cx, cy]
         self.real_intrinsics = np.array([[591.0125, 0, 322.525], [0, 590.16775, 244.11084], [0, 0, 1]], dtype=np.float)
 
-        self.invaild_list = []
+        invalid_list_cache_path = os.path.join(self.data_dir, f'invalid_list_cache_dict_{source}_{per_obj}.txt')
+        self.invalid_list_cache_path = invalid_list_cache_path
+        self.invalid_dict = {}
+        if os.path.exists(invalid_list_cache_path):
+            with open(invalid_list_cache_path, 'r') as file:
+                while True:
+                    line = file.readline()
+                    if not line:
+                        break
+                    path, inst_id = line.split()
+                    inst_id = int(inst_id)
+                    if path in self.invalid_dict.keys():
+                        self.invalid_dict[path].append(inst_id)
+                    else:
+                        self.invalid_dict[path] = [inst_id]
+
         self.mug_sym = mmcv.load(os.path.join(self.data_dir, 'Real/train/mug_handle.pkl'))
+        self.shape_prior = np.load(os.path.join(data_dir, 'results/mean_shape/mean_points_emb.npy'))
 
         print('{} images found.'.format(self.length))
         print('{} models loaded.'.format(len(self.models)))
@@ -159,8 +175,8 @@ class PoseDataset(data.Dataset):
         #  if per_obj is specified, then we only select the target object
         # index = index % self.length  # here something wrong
         img_path = os.path.join(self.data_dir, self.img_list[index])
-        if img_path in self.invaild_list:
-            return self.__getitem__((index + 1) % self.__len__())
+        # if img_path in self.invalid_dict:
+        #     return self.__getitem__((index + 1) % self.__len__())
         try:
             with open(img_path + '_label.pkl', 'rb') as f:
                 gts = cPickle.load(f)
@@ -175,11 +191,19 @@ class PoseDataset(data.Dataset):
 
         # select one foreground object,
         # if specified, then select the object
-        if self.per_obj != '':
-            idx = gts['class_ids'].index(self.per_obj_id)
+
+        if self.per_obj in self.cat_names:
+            idx_per_obj = []
+            for item in enumerate(gts['class_ids']):
+                if item[1] == self.per_obj_id:
+                    idx_per_obj.append(item[0])
+            idx = random.choice(idx_per_obj)
+            # idx = gts['class_ids'].index(self.per_obj_id)
         else:
             idx = random.randint(0, len(gts['instance_ids']) - 1)
-
+        if img_path in self.invalid_dict.keys():
+            if gts['instance_ids'][idx] in self.invalid_dict[img_path]:
+                return self.__getitem__((index + 1) % self.__len__())
         if gts['class_ids'][idx] == 6 and img_type == 'real':
             handle_tmp_path = img_path.split('/')
             scene_label = handle_tmp_path[-2] + '_res'
@@ -210,14 +234,27 @@ class PoseDataset(data.Dataset):
         else:
             return self.__getitem__((index + 1) % self.__len__())
 
-        coord = cv2.imread(img_path + '_coord.png')
-        if coord is not None:
-            coord = coord[:, :, :3]
+        # cat_id, rotation translation and scale
+        cat_id = gts['class_ids'][idx] - 1  # convert to 0-indexed
+        # note that this is nocs model, normalized along diagonal axis
+        model_name = gts['model_list'][idx]
+
+        nocs_coord = cv2.imread(img_path + '_coord.png')
+        if nocs_coord is not None:
+            nocs_coord = nocs_coord[:, :, :3]
         else:
             return self.__getitem__((index + 1) % self.__len__())
-        coord = coord[:, :, (2, 1, 0)]
-        coord = np.array(coord, dtype=np.float32) / 255
-        coord[:, :, 2] = 1 - coord[:, :, 2]
+        nocs_coord = nocs_coord[:, :, (2, 1, 0)]
+        nocs_coord = np.array(nocs_coord, dtype=np.float32) / 255
+        nocs_coord[:, :, 2] = 1 - nocs_coord[:, :, 2]
+        # [0, 1] -> [-0.5, 0.5]
+        nocs_coord = nocs_coord - 0.5
+
+        # adjust nocs coords for mug category
+        if cat_id == 5:
+            T0 = self.mug_meta[model_name][0]
+            s0 = self.mug_meta[model_name][1]
+            nocs_coord = s0 * (nocs_coord + T0)
 
         # aggragate information about the selected object
         inst_id = gts['instance_ids'][idx]
@@ -236,9 +273,12 @@ class PoseDataset(data.Dataset):
             coord_2d, bbox_center, scale, FLAGS.img_size, interpolation=cv2.INTER_NEAREST
         ).transpose(2, 0, 1)
 
+
         mask_target = mask.copy().astype(np.float)
         mask_target[mask != inst_id] = 0.0
         mask_target[mask == inst_id] = 1.0
+        nocs_coord[mask_target==0] = 0
+
         # depth[mask_target == 0.0] = 0.0
         roi_mask = crop_resize_by_warp_affine(
             mask_target, bbox_center, scale, FLAGS.img_size, interpolation=cv2.INTER_NEAREST
@@ -247,6 +287,9 @@ class PoseDataset(data.Dataset):
         roi_depth = crop_resize_by_warp_affine(
             depth, bbox_center, scale, FLAGS.img_size, interpolation=cv2.INTER_NEAREST
         )
+        roi_nocs_coord = crop_resize_by_warp_affine(
+            nocs_coord, bbox_center, scale, FLAGS.img_size, interpolation=cv2.INTER_NEAREST
+        ).transpose(2, 0, 1)
 
         roi_depth = np.expand_dims(roi_depth, axis=0)
         # normalize depth
@@ -258,23 +301,27 @@ class PoseDataset(data.Dataset):
             return self.__getitem__((index + 1) % self.__len__())
 
         depth_v_value = roi_depth[roi_m_d_valid]
-        depth_normalize = (roi_depth - np.min(depth_v_value)) / (np.max(depth_v_value) - np.min(depth_v_value))
+        depth_normalize = (roi_depth - np.min(depth_v_value)) / (np.max(depth_v_value) - np.min(depth_v_value) + 1e-10)
         depth_normalize[~roi_m_d_valid] = 0.0
-        # cat_id, rotation translation and scale
-        cat_id = gts['class_ids'][idx] - 1  # convert to 0-indexed
-        # note that this is nocs model, normalized along diagonal axis
-        model_name = gts['model_list'][idx]
-        model = self.models[gts['model_list'][idx]].astype(np.float32)  # 1024 points
-        nocs_scale = gts['scales'][idx]  # nocs_scale = image file / model file
-        # fsnet scale (from model) scale residual
-        fsnet_scale, mean_shape = self.get_fs_net_scale(self.id2cat_name[str(cat_id + 1)], model, nocs_scale)
-        fsnet_scale = fsnet_scale / 1000.0
-        mean_shape = mean_shape / 1000.0
+        model = self.models[model_name].astype(np.float32)  # 1024 points
+        nocs_scale = gts['scales'][idx]  # model bounding box diagonal length !!
+        # NOTE: gt of train dataset is the original annotation, which has no refinement on mug !!
         rotation = gts['rotations'][idx]
         translation = gts['translations'][idx]
+        if cat_id == 5:
+            translation = translation - nocs_scale * rotation @ T0
+            nocs_scale = nocs_scale / s0
+        # fsnet scale (from model) scale residual
+        fsnet_scale_delta, mean_shape = self.get_fs_net_scale(self.id2cat_name[str(cat_id + 1)], model, nocs_scale)
+        fsnet_scale_delta = fsnet_scale_delta / 1000.0
+        mean_shape = mean_shape / 1000.0
 
+        # some data need generation
+        ######################
+        ######################
         # dense depth map
         dense_depth = depth_normalize
+        # occupancy canonical
         # sym
         sym_info = self.get_sym_info(self.id2cat_name[str(cat_id + 1)], mug_handle=mug_handle)
         # add nnoise to roi_mask
@@ -283,6 +330,8 @@ class PoseDataset(data.Dataset):
         # generate augmentation parameters
         bb_aug, rt_aug_t, rt_aug_R = self.generate_aug_parameters()
 
+        shape_prior = self.shape_prior[cat_id]
+
         data_dict = {}
         data_dict['roi_img'] = torch.as_tensor(roi_img.astype(np.float32)).contiguous()
         data_dict['roi_depth'] = torch.as_tensor(roi_depth.astype(np.float32)).contiguous()
@@ -290,10 +339,11 @@ class PoseDataset(data.Dataset):
         data_dict['depth_normalize'] = torch.as_tensor(depth_normalize.astype(np.float32)).contiguous()
         data_dict['cam_K'] = torch.as_tensor(out_camK.astype(np.float32)).contiguous()
         data_dict['roi_mask'] = torch.as_tensor(roi_mask.astype(np.float32)).contiguous()
+        data_dict['cat_id_0_base'] = torch.as_tensor(cat_id, dtype=torch.float32).contiguous()
         data_dict['cat_id'] = torch.as_tensor(cat_id, dtype=torch.float32).contiguous()
         data_dict['rotation'] = torch.as_tensor(rotation, dtype=torch.float32).contiguous()
         data_dict['translation'] = torch.as_tensor(translation, dtype=torch.float32).contiguous()
-        data_dict['fsnet_scale'] = torch.as_tensor(fsnet_scale, dtype=torch.float32).contiguous()
+        data_dict['fsnet_scale_delta'] = torch.as_tensor(fsnet_scale_delta, dtype=torch.float32).contiguous()
         data_dict['sym_info'] = torch.as_tensor(sym_info.astype(np.float32)).contiguous()
         data_dict['roi_coord_2d'] = torch.as_tensor(roi_coord_2d, dtype=torch.float32).contiguous()
         data_dict['mean_shape'] = torch.as_tensor(mean_shape, dtype=torch.float32).contiguous()
@@ -303,7 +353,10 @@ class PoseDataset(data.Dataset):
         data_dict['roi_mask_deform'] = torch.as_tensor(roi_mask_def, dtype=torch.float32).contiguous()
         data_dict['model_point'] = torch.as_tensor(model, dtype=torch.float32).contiguous()
         data_dict['nocs_scale'] = torch.as_tensor(nocs_scale, dtype=torch.float32).contiguous()
-
+        data_dict['shape_prior'] = torch.as_tensor(shape_prior, dtype=torch.float32).contiguous()
+        data_dict['nocs_coord'] = torch.as_tensor(roi_nocs_coord, dtype=torch.float32).contiguous()
+        data_dict['img_path'] = img_path
+        data_dict['inst_id'] = inst_id
         return data_dict
 
 

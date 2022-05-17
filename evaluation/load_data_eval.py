@@ -23,6 +23,7 @@ class PoseDataset(data.Dataset):
     def __init__(self, source=None, mode='test',
                  n_pts=1024, img_size=256):
         '''
+
         :param source: 'CAMERA' or 'Real' or 'CAMERA+Real'
         :param mode: 'train' or 'test'
         :param data_dir: 'path to dataset'
@@ -61,6 +62,7 @@ class PoseDataset(data.Dataset):
             if mode == 'test':
                 del img_list_path[0]
                 del model_file_path[0]
+
         img_list = []
         subset_len = []
         #  aggregate all availabel datasets
@@ -147,8 +149,8 @@ class PoseDataset(data.Dataset):
         self.camera_intrinsics = np.array([[577.5, 0, 319.5], [0, 577.5, 239.5], [0, 0, 1]],
                                           dtype=np.float)  # [fx, fy, cx, cy]
         self.real_intrinsics = np.array([[591.0125, 0, 322.525], [0, 590.16775, 244.11084], [0, 0, 1]], dtype=np.float)
-
         self.invaild_list = []
+        self.shape_prior = np.load(os.path.join(data_dir, 'results/mean_shape/mean_points_emb.npy'))
 
         print('{} images found.'.format(self.length))
         print('{} models loaded.'.format(len(self.models)))
@@ -214,7 +216,7 @@ class PoseDataset(data.Dataset):
         obj_ids_0base = []
         roi_coord_2ds = []
         obj_valid_index = []
-
+        shape_priors = []
         for j in range(num_instance):
             cat_id = detection_dict['pred_class_ids'][j]
             if self.per_obj_id is not None:
@@ -276,6 +278,8 @@ class PoseDataset(data.Dataset):
             sym_info = self.get_sym_info(self.id2cat_name[str(cat_id)])
             mean_shape = self.get_mean_shape(self.id2cat_name[str(cat_id)])
             mean_shape = mean_shape / 1000.0
+            shape_prior = self.shape_prior[cat_id - 1]
+
             roi_imgs.append(roi_img)
             roi_depths.append(roi_depth)
             roi_masks.append(roi_mask)
@@ -285,6 +289,7 @@ class PoseDataset(data.Dataset):
             obj_ids.append(cat_id)
             obj_ids_0base.append(cat_id - 1)
             roi_coord_2ds.append(roi_coord_2d)
+            shape_priors.append(shape_prior)
 
         if self.per_obj_id is not None:
             for key in ['pred_class_ids', 'pred_bboxes', 'pred_scores']:
@@ -303,6 +308,7 @@ class PoseDataset(data.Dataset):
         obj_ids = np.array(obj_ids)
         obj_ids_0base = np.array(obj_ids_0base)
         roi_coord_2ds = np.array(roi_coord_2ds)
+        shape_priors = np.array(shape_priors)
         data_dict = {}
         data_dict['roi_img'] = torch.as_tensor(roi_imgs.astype(np.float32)).contiguous()
         data_dict['roi_depth'] = torch.as_tensor(roi_depths.astype(np.float32)).contiguous()
@@ -314,6 +320,8 @@ class PoseDataset(data.Dataset):
         data_dict['sym_info'] = torch.as_tensor(sym_infos.astype(np.float32)).contiguous()
         data_dict['mean_shape'] = torch.as_tensor(mean_shapes, dtype=torch.float32).contiguous()
         data_dict['roi_coord_2d'] = torch.as_tensor(roi_coord_2ds, dtype=torch.float32).contiguous()
+        data_dict['shape_prior'] = torch.as_tensor(shape_priors, dtype=torch.float32).contiguous()
+
         return data_dict, detection_dict, gts
 
 
@@ -447,3 +455,33 @@ class PoseDataset(data.Dataset):
                 np.prod(bbox_2_max - bbox_2_min) - intersections
         overlaps = intersections / union
         return overlaps
+if __name__ == '__main__':
+    def main(argv):
+        dataset = SketchPoseDataset(source='CAMERA')
+        for i in range(10):
+            data = dataset[i]
+            device = 'cpu'
+            img, s_d_map, d_d_map = data[0].to(device).numpy(), data[1].to(device), data[2].to(device)
+            s_d_map_n, camK = data[3].to(device), data[4].to(device)
+            obj_mask, obj_id = data[5].to(device), data[6].to(device)
+            R, T, s = data[7].to(device), data[8].to(device), data[9].to(device)
+            occupancy, sym = data[10].to(device), data[11].to(device)
+            grid, sketch = data[12].to(device).numpy(), data[13].to(device).numpy()
+            grid = grid.transpose(1, 2, 0) * 16
+            sketch[sketch != 0] = 200
+            img = img.transpose(1, 2, 0)
+            fuse = img.copy()
+            sketch = sketch.transpose(1, 2, 0)
+            zeros = np.zeros_like(sketch)
+            sketch_stack = np.concatenate([sketch, zeros, zeros], axis=-1)
+            grid = np.concatenate([grid, zeros], axis=-1)
+            fuse[sketch_stack > 0] = sketch_stack[sketch_stack > 0]
+            cv2.imwrite(f'/data2/zrd/debug/sketch_camera_points_{i}.png', sketch)
+            cv2.imwrite(f'/data2/zrd/debug/img_camera_points_{i}.png', img)
+            cv2.imwrite(f'/data2/zrd/debug/fuse_camera_points_{i}.png', fuse)
+            cv2.imwrite(f'/data2/zrd/debug/grid_camera_points_{i}.png', grid)
+
+
+    from absl import app
+
+    app.run(main)
