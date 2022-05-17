@@ -4,8 +4,9 @@ Pytorch implementation of GPV-Pose: Category-level Object Pose Estimation via Ge
 
 ![pipeline](pic/pipeline.png)
 
-## UPDATE
-A new version of code which integrates shape prior information will be updated to the shape-prior-integrated branch in this repo soon.
+## UPDATE!
+A new version of code which integrates shape prior information has been updated to the shape-prior-integrated branch in this repo!
+A brief introuction will be presented in this file.
 
 ## Required environment
 
