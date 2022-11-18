@@ -5,7 +5,7 @@ Pytorch implementation of GPV-Pose: Category-level Object Pose Estimation via Ge
 ![pipeline](pic/pipeline.png)
 
 ## UPDATE!
-The results on NOCS can be found [here](https://drive.google.com/drive/folders/1hSaE1xYdBDJmMkVTt1i9JkrUgl_nNZO1?usp=sharing).
+The results on NOCS and the trained model on CAMERA can be found [here](https://drive.google.com/drive/folders/1hSaE1xYdBDJmMkVTt1i9JkrUgl_nNZO1?usp=sharing).
 
 A new version of code which integrates shape prior information has been updated to [the shape-prior-integrated branch](https://github.com/lolrudy/GPV_Pose/tree/shape-prior-integrated) in this repo!
 A brief introuction will be presented in this file.
